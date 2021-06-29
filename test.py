@@ -95,6 +95,11 @@ def test(data,
     p, r, f1, mp, mr, map50, map, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
     loss = torch.zeros(3, device=device)
     jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
+    jimgs, jlabels = [], []
+    img_id_counter, label_id_counter = 0, 0
+    with open("instances_example.json", "r") as read_file_json:
+        json_pseudo_labels = json.load(read_file_json)
+
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         img = img.to(device, non_blocking=True)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -121,6 +126,25 @@ def test(data,
 
         # Statistics per image
         for si, pred in enumerate(output):
+            img_id_counter += 1
+            img_path = Path(paths[si])
+            file_name = img_path.name
+            """
+            print(f" si = {si}")
+            print(f" path = {path}")
+            print(f" file_name = {file_name}")
+            """
+            jimgs.append({
+                "license": 1,
+                "file_name": file_name,
+                "coco_url": "",
+                "height": shapes[si][0][0],
+                "width": shapes[si][0][1],
+                "date_captured": "2021-06-06 17:02:52",
+                "flickr_url": "",
+                "id": img_id_counter
+            })
+            
             labels = targets[targets[:, 0] == si, 1:]
             nl = len(labels)
             tcls = labels[:, 0].tolist() if nl else []  # target class
@@ -156,6 +180,7 @@ def test(data,
             # Clip boxes to image bounds
             clip_coords(pred, (height, width))
 
+            """
             # Append to pycocotools JSON dictionary
             if save_json:
                 # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
@@ -169,6 +194,34 @@ def test(data,
                                   'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
                                   'bbox': [round(x, 3) for x in b],
                                   'score': round(p[4], 5)})
+            """
+
+            # Append to JSON dictionary for COCO-format pseudo-labels 
+            if save_json:
+                # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
+                image_id = int(path.stem) if path.stem.isnumeric() else path.stem
+                box = pred[:, :4].clone()  # xyxy
+                scale_coords(img[si].shape[1:], box, shapes[si][0], shapes[si][1])  # to original shape
+                box = xyxy2xywh(box)  # xywh
+                box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
+                for p, b in zip(pred.tolist(), box.tolist()):
+                    label_id_counter += 1
+                    jlabels.append({
+                        "segmentation": {},
+                        "area": 0,
+                        "iscrowd": 0,
+                        "image_id": img_id_counter,
+                        "bbox": [round(x, 2) for x in b],
+                        "category_id": coco91class[int(p[5])] if is_coco else int(p[5]),
+                        "id": label_id_counter
+                    },)
+                                        
+                    jdict.append({'image_id': image_id,
+                                  'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
+                                  'bbox': [round(x, 3) for x in b],
+                                  'score': round(p[4], 5)})
+
+            #print(f" jlabels = {jlabels}")
 
             # Assign all predictions as incorrect
             correct = torch.zeros(pred.shape[0], niou, dtype=torch.bool, device=device)
@@ -247,6 +300,15 @@ def test(data,
         print('\nEvaluating pycocotools mAP... saving %s...' % pred_json)
         with open(pred_json, 'w') as f:
             json.dump(jdict, f)
+
+        jimgs_annotations = {"images": jimgs}
+        json_pseudo_labels.update(jimgs_annotations)
+
+        jlabels_annotations = {"annotations": jlabels}
+        json_pseudo_labels.update(jlabels_annotations)
+
+        with open("out.json", 'w') as f:
+            json.dump(json_pseudo_labels, f)
 
         try:  # https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocoEvalDemo.ipynb
             from pycocotools.coco import COCO
