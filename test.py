@@ -212,7 +212,7 @@ def test(data,
                         "iscrowd": 0,
                         "image_id": img_id_counter,
                         "bbox": [round(x, 2) for x in b],
-                        "category_id": coco91class[int(p[5])] if is_coco else int(p[5]),
+                        "category_id": int(p[5]),
                         "id": label_id_counter
                     },)
                                         
