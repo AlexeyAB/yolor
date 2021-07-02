@@ -208,12 +208,13 @@ def test(data,
                     label_id_counter += 1
                     jlabels.append({
                         "segmentation": {},
-                        "area": 0,
+                        "area": int(p[2]) * int(p[3]),
                         "iscrowd": 0,
                         "image_id": img_id_counter,
                         "bbox": [round(x, 2) for x in b],
                         "category_id": coco91class[int(p[5])],
-                        "id": label_id_counter
+                        "id": label_id_counter,
+                        "score": round(p[4], 5),
                     },)
                                         
                     jdict.append({'image_id': image_id,
