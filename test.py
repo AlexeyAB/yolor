@@ -256,13 +256,15 @@ def test(data,
 
             # Append statistics (correct, conf, pcls, tcls)
             stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
-
+        
+        """
         # Plot images
         if plots and batch_i < 3:
             f = save_dir / f'test_batch{batch_i}_labels.jpg'  # filename
             plot_images(img, targets, paths, f, names)  # labels
             f = save_dir / f'test_batch{batch_i}_pred.jpg'
             plot_images(img, output_to_target(output, width, height), paths, f, names)  # predictions
+        """
 
     # Compute statistics
     stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
