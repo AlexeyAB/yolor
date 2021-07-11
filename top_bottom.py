@@ -10,8 +10,9 @@ import collections
 
 # Keep only the first N labels in JSON file with the Highest/Lowest confidence-score
 # set params
-num_elements = 2000
-bottom_flag = False     # get Top or Bottom N elements
+num_elements = 200
+top_flag = False     # get Top or Bottom N elements
+keep_all_labels_on_image = True
 json_filename = "yolov4_cocounlabeled_55_ann0.5.json"
 
 
@@ -69,7 +70,7 @@ for annotation in loaded_json['annotations']:
 
 # sort by scores
 for category_key, dict_value in ann_dict.items():
-    sorted_first_N_vals = [dict_value[k] for k in sorted(dict_value.keys(), reverse=bottom_flag)[:num_elements]]
+    sorted_first_N_vals = [dict_value[k] for k in sorted(dict_value.keys(), reverse=top_flag)[:num_elements]]
 
     ann_dict[category_key] = sorted_first_N_vals
     #print(f"category = {category}")
@@ -95,11 +96,27 @@ for label in label_list:
     img_ids.append(label['image_id'])
 
 # keep unique IDs
-img_ids = list(set(img_ids))
+img_ids = set(img_ids)
+
+
+img_ids_dict = {}
+for i in img_ids:
+    img_ids_dict[i] = None
 
 # list of images
 img_list = []
 img_list = [images_dict[k] for k in img_ids]
+
+if keep_all_labels_on_image:
+    label_list = []
+    for annotation in loaded_json['annotations']:
+        image_id = annotation['image_id']
+        if image_id in img_ids_dict:
+            label_list.append(annotation)
+
+
+print(f" all images = {len(images_dict)}, kept images = {len(img_list)}")
+print(f" all labels = {len(loaded_json['annotations'])}, kept labels = {len(label_list)}")
 
 
 # save JSON
