@@ -11,7 +11,7 @@ import collections
 # Keep only the first N labels in JSON file with the Highest/Lowest confidence-score
 # set params
 num_elements = 2000
-top_flag = True     # get Top or Bottom N elements
+bottom_flag = False     # get Top or Bottom N elements
 json_filename = "yolov4_cocounlabeled_55_ann0.5.json"
 
 
@@ -69,7 +69,7 @@ for annotation in loaded_json['annotations']:
 
 # sort by scores
 for category_key, dict_value in ann_dict.items():
-    sorted_first_N_vals = [dict_value[k] for k in sorted(dict_value.keys(), reverse=top_flag)[:num_elements]]
+    sorted_first_N_vals = [dict_value[k] for k in sorted(dict_value.keys(), reverse=bottom_flag)[:num_elements]]
 
     ann_dict[category_key] = sorted_first_N_vals
     #print(f"category = {category}")
