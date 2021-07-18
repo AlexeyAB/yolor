@@ -12,7 +12,7 @@ from tqdm import tqdm
 from models.experimental import attempt_load
 from utils.datasets import create_dataloader
 from utils.general import coco80_to_coco91_class, check_dataset, check_file, check_img_size, box_iou, \
-    non_max_suppression, scale_coords, xyxy2xywh, xywh2xyxy, clip_coords, set_logging, increment_path
+    non_max_suppression, scale_coords, xyxy2xywh, xywh2xyxy, clip_coords, set_logging, increment_path, last_directories_from_path
 from utils.loss import compute_loss
 from utils.metrics import ap_per_class
 from utils.plots import plot_images, output_to_target
@@ -128,7 +128,8 @@ def test(data,
         for si, pred in enumerate(output):
             img_id_counter += 1
             img_path = Path(paths[si])
-            file_name = img_path.name
+            #file_name = img_path.name
+            file_name = last_directories_from_path(img_path, depth=opt.save_path_depth)
             """
             print(f" si = {si}")
             print(f" path = {path}")
@@ -357,6 +358,7 @@ if __name__ == '__main__':
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
     parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
     parser.add_argument('--save-json', action='store_true', help='save a cocoapi-compatible JSON results file')
+    parser.add_argument('--save-path-depth', type=int, default=0, help='path depth stored in JSON')
     parser.add_argument('--project', default='runs/test', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')

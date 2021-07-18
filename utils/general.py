@@ -432,3 +432,14 @@ def increment_path(path, exist_ok=True, sep=''):
         i = [int(m.groups()[0]) for m in matches if m]  # indices
         n = max(i) + 1 if i else 2  # increment number
         return f"{path}{sep}{n}"  # update path
+
+
+def last_directories_from_path(path, depth=0):
+    path = os.path.normpath(path)
+    head_tail = path.split(os.sep)
+
+    result = head_tail[-1]
+    for i in range(depth):
+        result = head_tail[-(i+2)] + "/" + result
+
+    return result
