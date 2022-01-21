@@ -10,10 +10,10 @@ import collections
 
 # Keep only the first N labels in JSON file with the Highest/Lowest confidence-score
 # set params
-num_elements = 200
-top_flag = False     # get Top or Bottom N elements
+num_elements = 2000
+top_flag = True     # get Top or Bottom N elements
 keep_all_labels_on_image = True
-json_filename = "yolov4_cocounlabeled_55_ann0.5.json"
+json_filename = "yolov4_i21k_55_ann0.5.json"
 
 
 with open(json_filename, "r") as read_file_json:
