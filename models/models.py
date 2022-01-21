@@ -24,7 +24,18 @@ def create_modules(module_defs, img_size, cfg):
             filters = mdef['filters']
             k = mdef['size']  # kernel size
             stride = mdef['stride'] if 'stride' in mdef else (mdef['stride_y'], mdef['stride_x'])
-            if isinstance(k, int):  # single-size conv
+            repvgg = False
+            if "repvgg" in mdef:
+                repvgg = mdef['repvgg']
+
+            if repvgg and k==3:
+                modules.add_module('RepVGG', RepVGGBlock(in_channels=output_filters[-1],
+                                                       out_channels=filters,
+                                                       kernel_size=k,
+                                                       stride=stride,
+                                                       padding=k // 2 if mdef['pad'] else 0,
+                                                       groups=mdef['groups'] if 'groups' in mdef else 1))
+            elif isinstance(k, int):  # single-size conv
                 modules.add_module('Conv2d', nn.Conv2d(in_channels=output_filters[-1],
                                                        out_channels=filters,
                                                        kernel_size=k,
@@ -39,7 +50,7 @@ def create_modules(module_defs, img_size, cfg):
                                                           stride=stride,
                                                           bias=not bn))
 
-            if bn:
+            if bn and not repvgg:
                 modules.add_module('BatchNorm2d', nn.BatchNorm2d(filters, momentum=0.03, eps=1E-4))
             else:
                 routs.append(i)  # detection output (goes into yolo layer)
@@ -631,7 +642,11 @@ class Darknet(nn.Module):
         for a in list(self.children())[0]:
             if isinstance(a, nn.Sequential):
                 for i, b in enumerate(a):
-                    if isinstance(b, nn.modules.batchnorm.BatchNorm2d):
+                    if isinstance(b, RepVGGBlock):
+                        #print(f"fuse_repvgg_block")
+                        b.fuse_repvgg_block()
+                        break
+                    elif isinstance(b, nn.modules.batchnorm.BatchNorm2d):
                         # fuse this bn layer with the previous conv2d layer
                         conv = a[i - 1]
                         fused = torch_utils.fuse_conv_and_bn(conv, b)
