@@ -28,7 +28,9 @@ def create_modules(module_defs, img_size, cfg):
             if "repvgg" in mdef:
                 repvgg = mdef['repvgg']
 
+            use_bn=True
             if repvgg and k==3:
+                use_bn=False
                 modules.add_module('RepVGG', RepVGGBlock(in_channels=output_filters[-1],
                                                        out_channels=filters,
                                                        kernel_size=k,
@@ -50,7 +52,7 @@ def create_modules(module_defs, img_size, cfg):
                                                           stride=stride,
                                                           bias=not bn))
 
-            if bn and not repvgg:
+            if bn and use_bn:
                 modules.add_module('BatchNorm2d', nn.BatchNorm2d(filters, momentum=0.03, eps=1E-4))
             else:
                 routs.append(i)  # detection output (goes into yolo layer)
