@@ -1,5 +1,6 @@
 # Loss functions
 
+import math
 import torch
 import torch.nn as nn
 
@@ -89,7 +90,7 @@ def compute_loss(p, targets, model):  # predictions, targets, model
         b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
         tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
 
-        obj_idx = 5 if tangle[i] is not None else 4
+        obj_idx = 6 # 5 if tangle[i] is not None else 4
         n = b.shape[0]  # number of targets
         if n:
             nt += n  # cumulative targets
@@ -100,12 +101,19 @@ def compute_loss(p, targets, model):  # predictions, targets, model
                 rotation_giou = h['rotation_giou']
 
             if tangle[i] is not None:
-                pangle = ps[:, 4].to(device).sigmoid() * 4.0 - 2.0
+                #pangle = ps[:, 4].to(device).sigmoid() * 4. - 2.
+                pim = ps[:, 4].to(device).sigmoid() * 4. - 2.
+                pre = ps[:, 5].to(device).sigmoid() * 4. - 2.
+                pangle = torch.atan2(pim, pre) / math.pi
+
+                tim = torch.sin(tangle[i] * math.pi)
+                tre = torch.cos(tangle[i] * math.pi)
+
                 #print(f" ps = {ps.shape}, pxy = {pxy.shape}, pwh = {pwh.shape}, pbox = {pbox.shape}, iou = {iou.shape}, tbox[i] = {tbox[i].shape} ")
                 #print(f" ps = {ps.shape}, tangle[i] = {tangle[i].shape}, pangle = {pangle.shape}")
-                diff_angle = tangle[i] - pangle
-                tangle[i][diff_angle > 1.5] -= 2.0
-                tangle[i][diff_angle < -1.5] += 2.0
+                #diff_angle = tangle[i] - pangle
+                #tangle[i][diff_angle > 1.5] -= 2.0
+                #tangle[i][diff_angle < -1.5] += 2.0
 
                 # Bbox Regression
                 pxy = ps[:, :2].sigmoid() * 2. - 0.5
@@ -116,7 +124,10 @@ def compute_loss(p, targets, model):  # predictions, targets, model
                     iou, giou_loss = bbox_iou_rotated(pbox, pangle, tbox[i], tangle[i], GIoU=True, DIoU=False, CIoU=False)
                     lbox += giou_loss  # giou loss   
                 else:
-                    langle += MSEangle(pangle, tangle[i])
+                    langle += MSEangle(pim, tim)
+                    langle += MSEangle(pre, tre)
+
+                    #langle += MSEangle(pangle, tangle[i])
                     #print(f" langle = {langle}")
                     #print(f"\n tangle[i] = {tangle[i]}")
                     #print(f"\n pangle = {pangle}")

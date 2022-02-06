@@ -35,7 +35,7 @@ class Detect(nn.Module):
         self.no = nc + 5  # number of outputs per anchor
         self.rotated = rotated
         if self.rotated:
-            self.no += 1
+            self.no += 2 # 1
         print(f"\n\n self.no = {self.no}, self.rotated = {self.rotated} \n\n")
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
@@ -64,9 +64,14 @@ class Detect(nn.Module):
                 if not hasattr(self, 'rotated'):
                     self.rotated = False
                 if self.rotated:
-                    y[..., 4:5] = y[..., 4:5] * 4. - 2. # angle = (-2.0 ; +2.0), use only [-1.0; +1.0] -> [-pi; +pi]
+                    y[..., 4:6] = y[..., 4:6] * 4. - 2.
+                    y[..., 4] = torch.atan2(y[..., 4], y[..., 5]) / math.pi
+                    y = torch.cat((y[..., 0:5], y[..., 6:]), dim=-1)
 
-                z.append(y.view(bs, -1, self.no))
+                    #y[..., 4:5] = y[..., 4:5] * 4. - 2. # angle = (-2.0 ; +2.0), use only [-1.0; +1.0] -> [-pi; +pi]
+                    z.append(y.view(bs, -1, self.no-1))
+                else:
+                    z.append(y.view(bs, -1, self.no))
 
         return x if self.training else (torch.cat(z, 1), x)
 
@@ -86,7 +91,7 @@ class IDetect(nn.Module):
         self.no = nc + 5  # number of outputs per anchor
         self.rotated = rotated
         if self.rotated:
-            self.no += 1
+            self.no += 2 # 1
         print(f"\n\n self.no = {self.no}, self.rotated = {self.rotated} \n\n")
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
@@ -118,9 +123,14 @@ class IDetect(nn.Module):
                 if not hasattr(self, 'rotated'):
                     self.rotated = False
                 if self.rotated:
-                    y[..., 4:5] = y[..., 4:5] * 4. - 2. # angle = (-2.0 ; +2.0), use only [-1.0; +1.0] -> [-pi; +pi]
+                    y[..., 4:6] = y[..., 4:6] * 4. - 2.
+                    y[..., 4] = torch.atan2(y[..., 4], y[..., 5]) / math.pi
+                    y = torch.cat((y[..., 0:5], y[..., 6:]), dim=-1)
 
-                z.append(y.view(bs, -1, self.no))
+                    #y[..., 4:5] = y[..., 4:5] * 4. - 2. # angle = (-2.0 ; +2.0), use only [-1.0; +1.0] -> [-pi; +pi]
+                    z.append(y.view(bs, -1, self.no-1))
+                else:
+                    z.append(y.view(bs, -1, self.no))
 
         return x if self.training else (torch.cat(z, 1), x)
 
@@ -235,7 +245,7 @@ class Model(nn.Module):
         m = self.model[-1]  # Detect() module
         for mi, s in zip(m.m, m.stride):  # from
             b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
-            obj_idx = 5 if m.rotated else 4
+            obj_idx = 6 # 5 if m.rotated else 4
             b[:, obj_idx].data += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
             b[:, (obj_idx+1):].data += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
