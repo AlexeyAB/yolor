@@ -111,9 +111,9 @@ def compute_loss(p, targets, model):  # predictions, targets, model
 
                 #print(f" ps = {ps.shape}, pxy = {pxy.shape}, pwh = {pwh.shape}, pbox = {pbox.shape}, iou = {iou.shape}, tbox[i] = {tbox[i].shape} ")
                 #print(f" ps = {ps.shape}, tangle[i] = {tangle[i].shape}, pangle = {pangle.shape}")
-                #diff_angle = tangle[i] - pangle
-                #tangle[i][diff_angle > 1.5] -= 2.0
-                #tangle[i][diff_angle < -1.5] += 2.0
+                diff_angle = tangle[i] - pangle
+                tangle[i][diff_angle > 1.5] -= 2.0
+                tangle[i][diff_angle < -1.5] += 2.0
 
                 # Bbox Regression
                 pxy = ps[:, :2].sigmoid() * 2. - 0.5
