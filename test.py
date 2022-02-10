@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from models.experimental import attempt_load
 from utils.datasets import create_dataloader
-from utils.general import coco80_to_coco91_class, check_dataset, check_file, check_img_size, box_iou, \
+from utils.general import coco80_to_coco91_class, check_dataset, check_file, check_img_size, box_iou, box_iou_rotated1, box_iou_rotated2, \
     non_max_suppression, scale_coords, xyxy2xywh, xywh2xyxy, clip_coords, set_logging, increment_path
 from utils.loss import compute_loss
 from utils.metrics import ap_per_class
@@ -337,7 +337,10 @@ def test(data,
                     # Search for detections
                     if pi.shape[0]:
                         # Prediction to target ious
-                        ious, i = box_iou(pred[pi, :4], tbox[ti]).max(1)  # best ious, indices
+                        if model.rotated:
+                            ious, i = box_iou_rotated2(pred[pi, :4], pred[pi, 6], tbox[ti], labels[ti, 5]).max(1)  # best ious, indices
+                        else:
+                            ious, i = box_iou(pred[pi, :4], tbox[ti]).max(1)  # best ious, indices
 
                         # Append detections
                         detected_set = set()
