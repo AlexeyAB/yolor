@@ -97,6 +97,20 @@ class IDetect(nn.Module):
         self.na = len(anchors[0]) // 2  # number of anchors
         self.grid = [torch.zeros(1)] * self.nl  # init grid
         a = torch.tensor(anchors).float().view(self.nl, -1, 2)
+
+        if self.rotated:
+            print(f"\n nl = {self.nl}, na = {self.na}, a = {a.shape}, a = {a}")
+
+            angles = 3
+
+            self.na = self.na*angles
+            a = a.repeat(1, 1, angles).view(self.nl, self.na, 2)
+
+            angle_bias = torch.tensor([-0.67, 0.0, 0.67]).repeat(self.na//angles).view(1, self.na, 1, 1).float()
+            self.register_buffer('angle_bias', angle_bias)
+
+            print(f"\n nl = {self.nl}, nl = {self.nl}, a = {a.shape}, a = {a}")
+
         self.register_buffer('anchors', a)  # shape(nl,na,2)
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
@@ -123,8 +137,18 @@ class IDetect(nn.Module):
                 if not hasattr(self, 'rotated'):
                     self.rotated = False
                 if self.rotated:
+
+                    #print(f"\n y = {y.shape}, anchors[i] = {self.anchors[i].shape}, anchor_grid[i] = {self.anchor_grid[i].shape}, im_bias_table = {im_bias_table.shape} \n")
+
+                    #print(f"\n angle_bias = {self.angle_bias} \n anchor_grid = {self.anchor_grid}, y[..., 4]  = {y[..., 4]} \n")
+                    #print(f"\n angle_bias = {self.angle_bias.shape} \n anchor_grid = {self.anchor_grid.shape}, y[..., 4]  = {y[..., 4].shape} \n")
+
+                    im_bias = torch.sin( self.angle_bias * math.pi )
+                    re_bias = torch.cos( self.angle_bias * math.pi )
+
                     y[..., 4:6] = y[..., 4:6] * 4. - 2.
-                    y[..., 4] = torch.atan2(y[..., 4], y[..., 5]) / math.pi
+                    #y[..., 4] = torch.atan2(im_bias, re_bias) / math.pi
+                    y[..., 4] = torch.atan2(y[..., 4] + im_bias, y[..., 5] + re_bias) / math.pi
                     y = torch.cat((y[..., 0:5], y[..., 6:]), dim=-1)
 
                     #y[..., 4:5] = y[..., 4:5] * 4. - 2. # angle = (-2.0 ; +2.0), use only [-1.0; +1.0] -> [-pi; +pi]

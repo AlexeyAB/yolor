@@ -63,8 +63,10 @@ class FocalLoss(nn.Module):
 def compute_loss(p, targets, model):  # predictions, targets, model
     device = targets.device
     #print(device)
+    angle_bias_table = torch.tensor([-0.67, 0.0, 0.67], device=device)
+
     lcls, lbox, langle, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
-    tcls, tbox, tangle, indices, anchors = build_targets(p, targets, model)  # targets
+    tcls, tbox, tangle, indices, anchors = build_targets(p, targets, model, angle_bias_table)  # targets
     h = model.hyp  # hyperparameters
 
     # Define criteria
@@ -101,19 +103,32 @@ def compute_loss(p, targets, model):  # predictions, targets, model
                 rotation_giou = h['rotation_giou']
 
             if tangle[i] is not None:
+                im_bias = torch.sin( angle_bias_table[a % angle_bias_table.shape[0]] * math.pi )
+                re_bias = torch.cos( angle_bias_table[a % angle_bias_table.shape[0]] * math.pi )
+
                 #pangle = ps[:, 4].to(device).sigmoid() * 4. - 2.
-                pim = ps[:, 4].to(device).sigmoid() * 4. - 2.
-                pre = ps[:, 5].to(device).sigmoid() * 4. - 2.
+                pim = ps[:, 4].to(device).sigmoid() * 4. - 2. + im_bias
+                pre = ps[:, 5].to(device).sigmoid() * 4. - 2. + re_bias
                 pangle = torch.atan2(pim, pre) / math.pi
 
                 tim = torch.sin(tangle[i] * math.pi)
-                tre = torch.cos(tangle[i] * math.pi)
+                tre = torch.cos(tangle[i] * math.pi)                
 
                 #print(f" ps = {ps.shape}, pxy = {pxy.shape}, pwh = {pwh.shape}, pbox = {pbox.shape}, iou = {iou.shape}, tbox[i] = {tbox[i].shape} ")
                 #print(f" ps = {ps.shape}, tangle[i] = {tangle[i].shape}, pangle = {pangle.shape}")
                 diff_angle = tangle[i] - pangle
-                tangle[i][diff_angle > 1.5] -= 2.0
-                tangle[i][diff_angle < -1.5] += 2.0
+                tangle[i][diff_angle > 1.0] -= 2.0
+                tangle[i][diff_angle < -1.0] += 2.0
+                diff_angle = torch.abs(tangle[i] - pangle)
+
+                #print(f"\n\n diff_angle = {diff_angle} \n a = {a}  \n\n")
+
+                #print(f"\n i = {i},\n b = {b},\n a = {a},\n gj = {gj},\n gi = {gi} \n")
+                
+                #print(f"\n pim = {pim}, \n pre = {pre} \n")
+
+                
+                #print(f"\n grid_anch = {anchors[i].view(b, a, gj, gi)} \n")
 
                 # Bbox Regression
                 pxy = ps[:, :2].sigmoid() * 2. - 0.5
@@ -123,6 +138,9 @@ def compute_loss(p, targets, model):  # predictions, targets, model
                 if rotation_giou:
                     iou, giou_loss = bbox_iou_rotated(pbox, pangle, tbox[i], tangle[i], GIoU=True, DIoU=False, CIoU=False)
                     lbox += giou_loss  # giou loss   
+
+                    # Objectness
+                    tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
                 else:
                     langle += MSEangle(pim, tim)
                     langle += MSEangle(pre, tre)
@@ -135,6 +153,9 @@ def compute_loss(p, targets, model):  # predictions, targets, model
                     #print(f" shape: pbox = {pbox.shape}, tbox[i] = {tbox[i].shape}")
                     iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=False, CIoU=True)  # iou(prediction, target)
                     lbox += (1.0 - iou).mean()  # iou loss
+
+                    # Objectness
+                    tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * iou.detach().clamp(0).type(tobj.dtype) # * (1.0 - diff_angle.detach().clamp(min=0.0, max=1.0).type(tobj.dtype))  # iou ratio
             else:
                 #print(f"\n i = {i}, ps = {ps.shape}, pi = {pi.shape}, tobj = {tobj.shape}, no = len(p) = {no}, anchors[i] = {anchors[i].shape}, anchors = {len(anchors)}")
                 # Regression
@@ -144,8 +165,8 @@ def compute_loss(p, targets, model):  # predictions, targets, model
                 iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=False, CIoU=True)  # iou(prediction, target)
                 lbox += (1.0 - iou).mean()  # iou loss           
 
-            # Objectness
-            tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
+                # Objectness
+                tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
 
             # Classification
             if model.nc > 1:  # cls loss (only if multiple classes)
@@ -171,7 +192,7 @@ def compute_loss(p, targets, model):  # predictions, targets, model
     return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()
 
 
-def build_targets(p, targets, model):
+def build_targets(p, targets, model, angle_bias_table=None):
     # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
     det = model.module.model[-1] if is_parallel(model) else model.model[-1]  # Detect() module
     na, nt = det.na, targets.shape[0]  # number of anchors, targets
@@ -202,6 +223,21 @@ def build_targets(p, targets, model):
             # Matches
             r = t[:, :, 4:6] / anchors[:, None]  # wh ratio
             j = torch.max(r, 1. / r).max(2)[0] < model.hyp['anchor_t']  # compare
+
+            if t.shape[2] > 7:
+                angle = t[:, :, 6]
+                anch_idx = t[:, :, 7].long()
+                angle_bias = angle_bias_table[anch_idx % angle_bias_table.shape[0]]
+                angle_mask = torch.abs(angle_bias - angle) <= (1.0/angle_bias_table.shape[0] + 0.1)
+                #print(f"\n\n\n (1.0/angle_bias_table.shape[0] + 0.1) = {(1.0/angle_bias_table.shape[0] + 0.1)}")
+                #print(f"\n torch.abs(angle_bias - angle) = {torch.abs(angle_bias - angle)} ")
+                #print(f"\n angle_mask = {angle_mask} ")
+                #print(f"\n angle_bias = {angle_bias} ")
+                #print(f"\n angle = {angle} ")
+                #print(f"\n r = {r.shape} j = {j.shape} and {j.dtype}, angle_mask = {angle_mask.shape} and {angle_mask.dtype}")
+                #print(f"\n angle = {angle.shape}, anch_idx = {anch_idx.shape}, angle_bias = {angle_bias.shape} \n\n\n")
+                j = torch.logical_and(j, angle_mask) # compare
+
             # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
             #print(f" 2 t = {t.shape}")
             t = t[j]  # filter

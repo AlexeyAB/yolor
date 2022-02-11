@@ -94,9 +94,9 @@ def get_corners(x, y, w, l, yaw):
 def drawRotatedBox(img, x, y, w, l, yaw, color):
     bev_corners = get_corners(x, y, w, l, yaw)
     corners_int = bev_corners.reshape(-1, 1, 2).astype(int)
-    cv2.polylines(img, [corners_int], True, color, 2)
+    cv2.polylines(img, [corners_int], True, color, 1)
     corners_int = bev_corners.reshape(-1, 2)
-    cv2.line(img, (corners_int[0, 0], corners_int[0, 1]), (corners_int[3, 0], corners_int[3, 1]), (255, 255, 0), 2)
+    cv2.line(img, (corners_int[0, 0], corners_int[0, 1]), (corners_int[3, 0], corners_int[3, 1]), (255, 255, 0), 1)
 
 
 def plot_one_rotated_box(x, angle, img, color=None, label=None, line_thickness=None):
