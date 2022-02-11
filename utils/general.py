@@ -325,45 +325,7 @@ def bbox_iou_rotated(pred_boxes, pred_angle, target_boxes, target_angle, GIoU=Tr
 
     return torch.tensor(ious, device=device, dtype=torch.float), giou_loss
 
-
-def box_iou_rotated1(box1, angle1, box2, angle2):
-    # Both sets of boxes are expected to be in (x1, y1, x2, y2) format.
-
-    device = box1.device
-
-    box1 = box1.to('cpu')
-    angle1 = angle1.to('cpu')
-    box2 = box2.to('cpu')
-    angle2 = angle2.to('cpu')
-
-    inter = torch.zeros((box1.shape[0], box2.shape[0]), device=box1.device, dtype=box1.dtype)
-
-    b1 = xyxy2xywh(box1)
-    b2 = xyxy2xywh(box2)
-
-    area1 = b1[:, 2] * b1[:, 3]
-    area2 = b2[:, 2] * b2[:, 3]
-
-    b_dist = torch.sqrt((b1[:, None, 0] - b2[:, 0])**2 + (b1[:, None, 1] - b2[:, 1])**2)
-    b1_diag = torch.sqrt( (b1[:, 2]/2)**2 + (b1[:, 3]/2)**2 )
-    b2_diag = torch.sqrt( (b2[:, 2]/2)**2 + (b2[:, 3]/2)**2 )
-    b_diag_sum = b1_diag[:, None] + b2_diag[:]
-    b_intersect = (b_diag_sum - b_dist) > 0
-
-    b1_conners = get_corners_vectorize(b1[:,0], b1[:,1], b1[:,2], b1[:,3], angle1 * math.pi)
-    b2_conners = get_corners_vectorize(b2[:,0], b2[:,1], b2[:,2], b2[:,3], angle2 * math.pi)
-
-    for b1i in (range(b1.shape[0])):
-        for b2i in range(b2.shape[0]):
-            if b_intersect[b1i, b2i]:
-                intersection = intersection_area(b1_conners[b1i], b2_conners[b2i])
-                intersection = max(0.0, min(1.0, intersection))
-                inter[b1i, b2i] = intersection
-
-    iou = (inter / (area1[:, None] + area2 - inter)).clamp(min=0.0, max=1.0).to(device)
-  
-    return iou
-
+    
 
 def rotated_iou(box1, angle1, box2, angle2):
     int_area = 0
@@ -390,7 +352,7 @@ def parallel_rotated_iou(b1i, b1, angle1, b2, angle2, b_intersect):
     return inter
 
 
-def box_iou_rotated2(box1, angle1, box2, angle2):
+def box_iou_rotated(box1, angle1, box2, angle2):
     # Both sets of boxes are expected to be in (x1, y1, x2, y2) format.
 
     device = box1.device
