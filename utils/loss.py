@@ -63,6 +63,8 @@ class FocalLoss(nn.Module):
 def compute_loss(p, targets, model):  # predictions, targets, model
     device = targets.device
     #print(device)
+    angle_bias_table = torch.tensor([-0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0], device=device)
+
     lcls, lbox, langle, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
     tcls, tbox, tangle, indices, anchors = build_targets(p, targets, model)  # targets
     h = model.hyp  # hyperparameters
@@ -90,7 +92,7 @@ def compute_loss(p, targets, model):  # predictions, targets, model
         b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
         tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
 
-        obj_idx = 6 # 5 if tangle[i] is not None else 4
+        obj_idx = 16 if tangle[i] is not None else 4
         n = b.shape[0]  # number of targets
         if n:
             nt += n  # cumulative targets
@@ -101,9 +103,31 @@ def compute_loss(p, targets, model):  # predictions, targets, model
                 rotation_giou = h['rotation_giou']
 
             if tangle[i] is not None:
+
+                #print(f"\n tangle[i] = {tangle[i].shape}, angle_bias_table = {angle_bias_table.shape}")
+
+                #angle_bias_table_ext = angle_bias_table.view(1, -1).repeat(tangle[i].shape[0], 1)
+                #print(f" angle_bias_table_ext = {angle_bias_table_ext.shape}")
+
+
+                diff_bias_target = torch.abs(tangle[i][:, None] - angle_bias_table)
+                _, angle_bias_idx = torch.min(diff_bias_target, dim=-1)
+
+                #print(f" len(tcls) = {len(tcls)}, tcls[i] = {tcls[i].shape}")
+
+                angle_bias = angle_bias_table[angle_bias_idx]
+                #print(f" diff_bias_target = {diff_bias_target.shape}, angle_bias_idx = {angle_bias_idx.shape}, angle_bias = {angle_bias.shape}")
+
+                tangle_bias = torch.full_like(ps[:, 6:16], cn, device=device)  # targets
+                tangle_bias[range(n), angle_bias_idx] = cp
+                langle += BCEcls(ps[:, 6:16], tangle_bias)  # BCE
+
+                im_bias = torch.sin( angle_bias * math.pi )
+                re_bias = torch.cos( angle_bias * math.pi )
+                
                 #pangle = ps[:, 4].to(device).sigmoid() * 4. - 2.
-                pim = ps[:, 4].to(device).sigmoid() * 4. - 2.
-                pre = ps[:, 5].to(device).sigmoid() * 4. - 2.
+                pim = ps[:, 4].to(device).sigmoid() * 0.5 - 0.25 + im_bias
+                pre = ps[:, 5].to(device).sigmoid() * 0.5 - 0.25 + re_bias
                 pangle = torch.atan2(pim, pre) / math.pi
 
                 tim = torch.sin(tangle[i] * math.pi)

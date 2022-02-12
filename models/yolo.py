@@ -91,11 +91,16 @@ class IDetect(nn.Module):
         self.no = nc + 5  # number of outputs per anchor
         self.rotated = rotated
         if self.rotated:
-            self.no += 2 # 1
+            self.no += 12 # 2 # 1
         print(f"\n\n self.no = {self.no}, self.rotated = {self.rotated} \n\n")
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
         self.grid = [torch.zeros(1)] * self.nl  # init grid
+
+        if self.rotated:
+            angle_bias = torch.tensor([-0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0]).float()
+            self.register_buffer('angle_bias', angle_bias)
+
         a = torch.tensor(anchors).float().view(self.nl, -1, 2)
         self.register_buffer('anchors', a)  # shape(nl,na,2)
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
@@ -123,12 +128,19 @@ class IDetect(nn.Module):
                 if not hasattr(self, 'rotated'):
                     self.rotated = False
                 if self.rotated:
-                    y[..., 4:6] = y[..., 4:6] * 4. - 2.
-                    y[..., 4] = torch.atan2(y[..., 4], y[..., 5]) / math.pi
-                    y = torch.cat((y[..., 0:5], y[..., 6:]), dim=-1)
+                    _, angle_bias_idx = torch.max(y[..., 6:16], dim=-1)
+                    angle_bias = self.angle_bias[angle_bias_idx]
+
+                    im_bias = torch.sin( angle_bias * math.pi )
+                    re_bias = torch.cos( angle_bias * math.pi )
+
+                    y[..., 4:6] = y[..., 4:6] * 0.5 - 0.25
+                    y[..., 4] = torch.atan2(y[..., 4] + im_bias, y[..., 5] + re_bias) / math.pi
+
+                    y = torch.cat((y[..., 0:5], y[..., 16:]), dim=-1)
 
                     #y[..., 4:5] = y[..., 4:5] * 4. - 2. # angle = (-2.0 ; +2.0), use only [-1.0; +1.0] -> [-pi; +pi]
-                    z.append(y.view(bs, -1, self.no-1))
+                    z.append(y.view(bs, -1, self.no-11))
                 else:
                     z.append(y.view(bs, -1, self.no))
 
