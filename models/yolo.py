@@ -14,6 +14,7 @@ import torch.nn.functional as F
 
 from models.common import Conv, Bottleneck, SPP, SPPCSP, VoVCSP, DWConv, Focus, BottleneckCSP, BottleneckCSPLG, BottleneckCSPSE, BottleneckCSPSAM, BottleneckCSPSEA, BottleneckCSPSAMA, BottleneckCSPSAMB, BottleneckCSPGC, BottleneckCSPDNL, BottleneckCSP2, BottleneckCSP2SAM, Concat, DownC, DownD, DNL, GC, SAM, SAMA, NMS, autoShape, TR, BottleneckCSPTR, BottleneckCSP2TR, SPPCSPTR, ReOrg, BottleneckCSPF, ImplicitA, ImplicitM, DWT, RepVGGBlock, ConvRepVGG, BottleneckCSPRepVGG2, BottleneckCSPRepVGG3, BottleneckCSPFRepVGG, BottleneckCSPFRepVGG2, BottleneckRepVGG
 from models.experimental import MixConv2d, CrossConv, C3
+from utils.loss import SigmoidBin
 from utils.autoanchor import check_anchor_order
 from utils.general import make_divisible, check_file, set_logging
 from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, scale_img, initialize_weights, \
@@ -91,15 +92,15 @@ class IDetect(nn.Module):
         self.no = nc + 5  # number of outputs per anchor
         self.rotated = rotated
         if self.rotated:
-            self.no += 12 # 2 # 1
+            self.no += 22 # 12 # 2 # 1
         print(f"\n\n self.no = {self.no}, self.rotated = {self.rotated} \n\n")
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
         self.grid = [torch.zeros(1)] * self.nl  # init grid
 
         if self.rotated:
-            angle_bias = torch.tensor([-0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0]).float()
-            self.register_buffer('angle_bias', angle_bias)
+            self.im_sigmoid = SigmoidBin(bin_count=10, min=-1.1, max=1.1)
+            self.re_sigmoid = SigmoidBin(bin_count=10, min=-1.1, max=1.1)
 
         a = torch.tensor(anchors).float().view(self.nl, -1, 2)
         self.register_buffer('anchors', a)  # shape(nl,na,2)
@@ -128,19 +129,17 @@ class IDetect(nn.Module):
                 if not hasattr(self, 'rotated'):
                     self.rotated = False
                 if self.rotated:
-                    _, angle_bias_idx = torch.max(y[..., 6:16], dim=-1)
-                    angle_bias = self.angle_bias[angle_bias_idx]
 
-                    im_bias = torch.sin( angle_bias * math.pi )
-                    re_bias = torch.cos( angle_bias * math.pi )
+                    im = self.im_sigmoid.forward(y[..., 4:15]) # 11 values = (1-reg + 10-bce)
+                    re = self.im_sigmoid.forward(y[..., 15:26]) # 11 values = (1-reg + 10-bce)
+                                        
+                    y[..., 4] = torch.atan2(im, re) / math.pi
 
-                    y[..., 4:6] = y[..., 4:6] * 0.5 - 0.25
-                    y[..., 4] = torch.atan2(y[..., 4] + im_bias, y[..., 5] + re_bias) / math.pi
-
-                    y = torch.cat((y[..., 0:5], y[..., 16:]), dim=-1)
+                    y = torch.cat((y[..., 0:5], y[..., 26:]), dim=-1)
 
                     #y[..., 4:5] = y[..., 4:5] * 4. - 2. # angle = (-2.0 ; +2.0), use only [-1.0; +1.0] -> [-pi; +pi]
-                    z.append(y.view(bs, -1, self.no-11))
+
+                    z.append(y.view(bs, -1, y.shape[-1]))
                 else:
                     z.append(y.view(bs, -1, self.no))
 

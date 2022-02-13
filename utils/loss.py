@@ -30,6 +30,92 @@ class BCEBlurWithLogitsLoss(nn.Module):
         return loss.mean()
 
 
+class SigmoidBin(nn.Module):
+    stride = None  # strides computed during build
+    export = False  # onnx export
+
+    def __init__(self, bin_count=10, min=0.0, max=1.0, reg_scale = 2.0, BCE_weight=1.0, smooth_eps=0.0):
+        super(SigmoidBin, self).__init__()
+        
+        self.bin_count = bin_count
+        self.length = bin_count + 1
+        self.min = min
+        self.max = max
+        self.scale = float(max - min)
+        self.shift = self.scale / 2.0
+
+        self.reg_scale = reg_scale
+        self.BCE_weight = BCE_weight
+
+        start = min + (self.scale/2.0) / self.bin_count
+        end = max - (self.scale/2.0) / self.bin_count
+        step = self.scale / self.bin_count
+        self.step = step
+        #print(f" start = {start}, end = {end}, step = {step} ")
+
+        bins = torch.range(start, end + 0.0001, step).float() 
+        self.register_buffer('bins', bins) 
+               
+
+        self.cp = 1.0 - 0.5 * smooth_eps
+        self.cn = 0.5 * smooth_eps
+
+        self.BCEbins = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([BCE_weight]))
+        self.MSELoss = nn.MSELoss()
+
+        #print(f" min_val = {self.bins[0] + (0.0 * self.reg_scale - self.reg_scale/2.0) * self.step} with clamp = {min} ")
+        #print(f" max_val = {self.bins[-1] + (1.0 * self.reg_scale - self.reg_scale/2.0) * self.step} with clamp = {max} ")
+
+        #print(f" min_reg = {(0.0 * self.reg_scale - self.reg_scale/2.0) * self.step}")
+        #print(f" max_reg = {(1.0 * self.reg_scale - self.reg_scale/2.0) * self.step}")
+        #print(f" bin_count = {bin_count}, reg_scale = {reg_scale}, reg_scale*step/2 = {reg_scale*step/2}, bins = {bins.shape}, bins = {bins} ")
+
+    def length(self):
+        return self.length
+
+    def forward(self, pred):
+        #assert pred.shape[-1] == self.length, 'pred.shape[-1]= is not equal to self.length='
+
+        pred_reg = (pred[..., 0] * self.reg_scale - self.reg_scale/2.0) * self.step
+        pred_bin = pred[..., 1:(1+self.bin_count)]
+
+        _, bin_idx = torch.max(pred_bin, dim=-1)
+        bin_bias = self.bins[bin_idx]
+
+        result = pred_reg + bin_bias
+        result = result.clamp(min=self.min, max=self.max)
+
+        return result
+
+
+    def training_loss(self, pred, target):
+        #assert pred.shape[-1] == self.length, 'pred.shape[-1]= is not equal to the self.length='
+        #assert pred.shape == target.shape, 'pred.shape= is not equal to the target.shape='
+        device = pred.device
+
+        pred_reg = (pred[..., 0].sigmoid() * self.reg_scale - self.reg_scale/2.0) * self.step
+        pred_bin = pred[..., 1:(1+self.bin_count)]
+
+        diff_bin_target = torch.abs(target[..., None] - self.bins)
+        _, bin_idx = torch.min(diff_bin_target, dim=-1)
+    
+        bin_bias = self.bins[bin_idx]
+        bin_bias.requires_grad = False
+        result = pred_reg + bin_bias
+
+        target_bins = torch.full_like(pred_bin, self.cn, device=device)  # targets
+        n = pred.shape[0] 
+        target_bins[range(n), bin_idx] = self.cp
+
+        loss_bin = self.BCEbins(pred_bin, target_bins) # BCE
+        loss_regression = self.MSELoss(result, target)  # MSE
+        
+        loss = loss_bin + loss_regression
+        out_result = result.detach().clamp(min=self.min, max=self.max)
+
+        return loss, out_result
+
+
 class FocalLoss(nn.Module):
     # Wraps focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)
     def __init__(self, loss_fcn, gamma=1.5, alpha=0.25):
@@ -63,7 +149,7 @@ class FocalLoss(nn.Module):
 def compute_loss(p, targets, model):  # predictions, targets, model
     device = targets.device
     #print(device)
-    angle_bias_table = torch.tensor([-0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0], device=device)
+    #angle_bias_table = torch.tensor([-0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0], device=device)
 
     lcls, lbox, langle, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
     tcls, tbox, tangle, indices, anchors = build_targets(p, targets, model)  # targets
@@ -73,6 +159,8 @@ def compute_loss(p, targets, model):  # predictions, targets, model
     BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([h['cls_pw']])).to(device)
     BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([h['obj_pw']])).to(device)
     MSEangle = nn.MSELoss().to(device)
+
+    imre_sigmoid = SigmoidBin(bin_count=10, min=-1.1, max=1.1).to(device)
 
     # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
     cp, cn = smooth_BCE(eps=0.0)
@@ -92,7 +180,7 @@ def compute_loss(p, targets, model):  # predictions, targets, model
         b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
         tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
 
-        obj_idx = 16 if tangle[i] is not None else 4
+        obj_idx = 26 if tangle[i] is not None else 4
         n = b.shape[0]  # number of targets
         if n:
             nt += n  # cumulative targets
@@ -108,36 +196,23 @@ def compute_loss(p, targets, model):  # predictions, targets, model
 
                 #angle_bias_table_ext = angle_bias_table.view(1, -1).repeat(tangle[i].shape[0], 1)
                 #print(f" angle_bias_table_ext = {angle_bias_table_ext.shape}")
-
-
-                diff_bias_target = torch.abs(tangle[i][:, None] - angle_bias_table)
-                _, angle_bias_idx = torch.min(diff_bias_target, dim=-1)
-
-                #print(f" len(tcls) = {len(tcls)}, tcls[i] = {tcls[i].shape}")
-
-                angle_bias = angle_bias_table[angle_bias_idx]
-                #print(f" diff_bias_target = {diff_bias_target.shape}, angle_bias_idx = {angle_bias_idx.shape}, angle_bias = {angle_bias.shape}")
-
-                tangle_bias = torch.full_like(ps[:, 6:16], cn, device=device)  # targets
-                tangle_bias[range(n), angle_bias_idx] = cp
-                langle += BCEcls(ps[:, 6:16], tangle_bias)  # BCE
-
-                im_bias = torch.sin( angle_bias * math.pi )
-                re_bias = torch.cos( angle_bias * math.pi )
                 
-                #pangle = ps[:, 4].to(device).sigmoid() * 4. - 2.
-                pim = ps[:, 4].to(device).sigmoid() * 0.5 - 0.25 + im_bias
-                pre = ps[:, 5].to(device).sigmoid() * 0.5 - 0.25 + re_bias
-                pangle = torch.atan2(pim, pre) / math.pi
-
                 tim = torch.sin(tangle[i] * math.pi)
                 tre = torch.cos(tangle[i] * math.pi)
 
+                im_loss, pim = imre_sigmoid.training_loss(ps[..., 4:15], tim)
+                re_loss, pre = imre_sigmoid.training_loss(ps[..., 15:26], tre)
+                langle += im_loss + re_loss
+               
+                pangle = torch.atan2(pim, pre) / math.pi
+                
                 #print(f" ps = {ps.shape}, pxy = {pxy.shape}, pwh = {pwh.shape}, pbox = {pbox.shape}, iou = {iou.shape}, tbox[i] = {tbox[i].shape} ")
                 #print(f" ps = {ps.shape}, tangle[i] = {tangle[i].shape}, pangle = {pangle.shape}")
+                
                 diff_angle = tangle[i] - pangle
                 tangle[i][diff_angle > 1.5] -= 2.0
                 tangle[i][diff_angle < -1.5] += 2.0
+                
 
                 # Bbox Regression
                 pxy = ps[:, :2].sigmoid() * 2. - 0.5
@@ -148,8 +223,8 @@ def compute_loss(p, targets, model):  # predictions, targets, model
                     iou, giou_loss = bbox_iou_rotated(pbox, pangle, tbox[i], tangle[i], GIoU=True, DIoU=False, CIoU=False)
                     lbox += giou_loss  # giou loss   
                 else:
-                    langle += MSEangle(pim, tim)
-                    langle += MSEangle(pre, tre)
+                    #langle += MSEangle(pim, tim)
+                    #langle += MSEangle(pre, tre)
 
                     #langle += MSEangle(pangle, tangle[i])
                     #print(f" langle = {langle}")
