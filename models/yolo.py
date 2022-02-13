@@ -92,15 +92,14 @@ class IDetect(nn.Module):
         self.no = nc + 5  # number of outputs per anchor
         self.rotated = rotated
         if self.rotated:
-            self.no += 22 # 12 # 2 # 1
+            self.im_sigmoid = SigmoidBin(bin_count=10, min=-1.1, max=1.1)
+            self.re_sigmoid = SigmoidBin(bin_count=10, min=-1.1, max=1.1)
+            self.no += self.im_sigmoid.length() + self.re_sigmoid.length()  # 22 # 12 # 2 # 1
+
         print(f"\n\n self.no = {self.no}, self.rotated = {self.rotated} \n\n")
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
         self.grid = [torch.zeros(1)] * self.nl  # init grid
-
-        if self.rotated:
-            self.im_sigmoid = SigmoidBin(bin_count=10, min=-1.1, max=1.1)
-            self.re_sigmoid = SigmoidBin(bin_count=10, min=-1.1, max=1.1)
 
         a = torch.tensor(anchors).float().view(self.nl, -1, 2)
         self.register_buffer('anchors', a)  # shape(nl,na,2)
